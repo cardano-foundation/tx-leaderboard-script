@@ -467,6 +467,33 @@ def get_total_tx_count(window_start, window_end):
             return int(cnt)
 
 
+def get_vote_stats(window_start, window_end, total_tx_count: int):
+    sql = load_sql("vote_stats.sql")
+    with psycopg.connect(**conninfo) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                sql,  # type: ignore[arg-type]
+                {
+                    "window_start": window_start,
+                    "window_end": window_end,
+                },
+            )
+
+            vote_tx_count, total_votes_cast = cur.fetchone()  # type: ignore[arg-type]
+
+    vote_tx_count = int(vote_tx_count or 0)
+    total_votes_cast = int(total_votes_cast or 0)
+    vote_tx_share_pct = 0.0
+    if total_tx_count > 0:
+        vote_tx_share_pct = round((vote_tx_count / total_tx_count) * 100, 4)
+
+    return {
+        "voteTxCount": vote_tx_count,
+        "totalVotesCast": total_votes_cast,
+        "voteTxSharePct": vote_tx_share_pct,
+    }
+
+
 def build_metadata(epoch_info, total_tx_count):
 
     return {
@@ -494,6 +521,12 @@ def build_report(epoch_info):
         epoch_info["window_end"],
     )
 
+    vote_stats = get_vote_stats(
+        epoch_info["window_start"],
+        epoch_info["window_end"],
+        total_tx_count,
+    )
+
     label_stats = get_metadata_label_stats(
         epoch_info["window_start"],
         epoch_info["window_end"],
@@ -502,6 +535,7 @@ def build_report(epoch_info):
     return {
         "metadata": build_metadata(epoch_info, total_tx_count),
         "appStats": app_stats,
+        "voteStats": vote_stats,
         "metadataLabelStats": label_stats,
         # "messageStats": {
         #     "label": 674,
