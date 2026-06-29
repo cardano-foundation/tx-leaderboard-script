@@ -61,6 +61,11 @@ Each run emits two reports with the same structure but different reporting windo
     {"label": "jpg.store", "displayName": "JPG Store", "txCount": 4200, "rank": 1},
     ...
   ],
+  "voteStats": {
+    "voteTxCount": 123,
+    "totalVotesCast": 456,
+    "voteTxSharePct": 0.0996
+  },
   "metadataLabelStats": [
     {"label": 674, "txCount": 8000, "verified": true, "description": "...", "rank": 1},
     ...
@@ -68,7 +73,12 @@ Each run emits two reports with the same structure but different reporting windo
 }
 ```
 
-The `appStats` section ranks projects by the number of transactions seen on their registered validator scripts, while `metadataLabelStats` highlights the most-used metadata labels and whether they appear in CIP-0010. (A more detailed label 674 message breakdown exists in `sql/674_messages.sql` and is easy to re-enable if needed.)
+The `appStats` section ranks projects by the number of transactions seen on their registered validator scripts, `voteStats` summarizes governance voting activity in the same reporting window (including the share of all transactions), and `metadataLabelStats` highlights the most-used metadata labels and whether they appear in CIP-0010. (A more detailed label 674 message breakdown exists in `sql/674_messages.sql` and is easy to re-enable if needed.)
+
+`voteStats` fields:
+- `voteTxCount`: distinct transactions that include at least one voting procedure.
+- `totalVotesCast`: total number of voting procedures recorded (a single transaction may include multiple votes).
+- `voteTxSharePct`: percentage of all transactions in the reporting window that are vote transactions (`voteTxCount / totalTxCount * 100`).
 
 ## SQL reference
 
@@ -76,4 +86,5 @@ The `appStats` section ranks projects by the number of transactions seen on thei
 - `sql/validator_tx_counts.sql` – counts distinct transactions per known script hash by combining output payment credential matches and mint policy matches.
 - `sql/label_counts.sql` – counts distinct transactions per metadata label.
 - `sql/total_tx_count.sql` – total distinct transactions in the reporting window.
+- `sql/vote_stats.sql` – counts distinct vote transactions and total votes cast in the reporting window.
 - `sql/674_messages.sql` – helper query to inspect individual label 674 `msg` entries (currently unused).
