@@ -2,5 +2,6 @@
 .venv/
 __pycache__/
 *.pyc
-data/
+data/*
+!data/cip20_apps.json
 .DS_Store

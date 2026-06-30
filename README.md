@@ -11,6 +11,41 @@ A small utility that compiles a JSON report about Cardano transaction metadata u
   - [`registry/scripts/script-index.json`](https://github.com/Tastenkunst/eternl-cardano-registry/blob/main/registry/scripts/script-index.json) as the script-hash source (`scripts` object keys grouped by `projectId`).
   - [`registry/projects/*.json`](https://github.com/Tastenkunst/eternl-cardano-registry/tree/main/registry/projects) to resolve project display names (from each file's `label`, with `projectId` fallback).
 
+## Registering a CIP-20 app
+
+Apps whose only on-chain identifier is a CIP-20 (label 674) transaction message can be
+attributed on the leaderboard by adding themselves to `data/cip20_apps.json` via a pull
+request.
+
+**This is only for apps without Plutus contracts.** If your app deploys validator
+scripts or mints under a policy, register your script hashes and mint policy IDs with
+the script-hash registries (CRFA, Strica, or Eternl) instead. That path attributes all
+of your transactions, not only the ones that carry a message.
+
+Each entry looks like:
+
+```json
+{ "label": "unfrack.it", "displayName": "Unfrack.it", "match": ["unfrack"], "matchType": "substring" }
+```
+
+- `label`: a stable identifier (lowercase, often your domain). Used as the appStats label.
+- `displayName`: the name shown on the leaderboard.
+- `match`: one or more patterns to look for in the transaction message. A pattern must
+  appear verbatim in the message exactly as your app writes it on chain; matching is
+  case-insensitive but otherwise literal, so include any punctuation the message
+  contains. For example unfrack.it tags its transactions with `https://unfrack.it`, so
+  `unfrack` or `unfrack.it` both work, but `unfrack it` (punctuation rewritten as a
+  space) does not match and your app would count zero.
+- `matchType`: `substring` matches when the pattern appears anywhere in the message (use
+  this when you prefix a stable tag, e.g. messages like `[adalink] ...`, with pattern
+  `adalink` or `[adalink]`). `exact` matches when the whole message equals the pattern,
+  ignoring case (use this when you emit a single fixed tag).
+
+Pick a pattern distinctive to your app, such as a project tag or your domain. Do not use
+a generic word like `cardano` or `swap`; it would falsely match unrelated transactions
+and your PR will be rejected. Before submitting, confirm your transactions actually carry
+the tag and that it does not collide with another listed app.
+
 ## Configuration
 
 Set the database credentials via environment variables or a `.env` file (loaded automatically):
@@ -39,8 +74,8 @@ python run.py
 
 Each run emits two reports with the same structure but different reporting windows:
 
-- `data/report.json` – ~6 epochs (≈30 days).
-- `data/report-73epochs.json` – ~73 epochs (≈365 days).
+- `data/report.json`: ~6 epochs (approx. 30 days).
+- `data/report-73epochs.json`: ~73 epochs (approx. 365 days).
 
 `data/report.json` contains:
 
@@ -68,12 +103,20 @@ Each run emits two reports with the same structure but different reporting windo
 }
 ```
 
-The `appStats` section ranks projects by the number of transactions seen on their registered validator scripts, while `metadataLabelStats` highlights the most-used metadata labels and whether they appear in CIP-0010. (A more detailed label 674 message breakdown exists in `sql/674_messages.sql` and is easy to re-enable if needed.)
+The `appStats` section ranks projects by transaction volume from two attribution
+sources: registered validator scripts (CRFA/Strica/Eternl script hashes and mint
+policies) and the CIP-20 app allowlist (`data/cip20_apps.json`). A project's `txCount`
+is the **distinct union** of both sources, deduplicated per project: a transaction that
+touches several of a project's own scripts, or that both hits a script and carries a
+matching message, is counted once for that project. A transaction touching two
+*different* projects still counts once for each. `metadataLabelStats` highlights the
+most-used metadata labels and whether they appear in CIP-0010.
 
 ## SQL reference
 
-- `sql/current_epoch.sql` – derives the rolling epoch window boundaries.
-- `sql/validator_tx_counts.sql` – counts distinct transactions per known script hash by combining output payment credential matches and mint policy matches.
-- `sql/label_counts.sql` – counts distinct transactions per metadata label.
-- `sql/total_tx_count.sql` – total distinct transactions in the reporting window.
-- `sql/674_messages.sql` – helper query to inspect individual label 674 `msg` entries (currently unused).
+- `sql/current_epoch.sql`: derives the rolling epoch window boundaries.
+- `sql/validator_tx_counts.sql`: counts distinct transactions per project (not per credential), grouping output payment credential and mint policy matches by the project each credential belongs to.
+- `sql/script_tx_overlap.sql`: for a given set of transaction ids, reports which already hit a project's scripts; used to dedupe CIP-20 message txs against script-attributed txs.
+- `sql/label_counts.sql`: counts distinct transactions per metadata label.
+- `sql/total_tx_count.sql`: total distinct transactions in the reporting window.
+- `sql/674_messages.sql`: candidate label 674 transactions (coarse `json::text` prefilter) for the CIP-20 app allowlist match.

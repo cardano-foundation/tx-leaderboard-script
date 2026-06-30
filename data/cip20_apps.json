@@ -1,0 +1,6 @@
+[
+  { "label": "adalink", "displayName": "AdaLink", "match": ["adalink"], "matchType": "substring" },
+  { "label": "dreptalk.com", "displayName": "DRepTalk", "match": ["dreptalk"], "matchType": "substring" },
+  { "label": "unfrack.it", "displayName": "Unfrack.it", "match": ["unfrack"], "matchType": "substring" },
+  { "label": "cardano.org", "displayName": "Cardano.org", "match": ["cardano.org"], "matchType": "exact" }
+]
