@@ -165,7 +165,7 @@ def compile_allowlist(allowlist):
     return compiled
 
 
-def count_cip20_app_txs(rows, allowlist):
+def cip20_app_tx_sets(rows, allowlist):
     compiled = compile_allowlist(allowlist)
     app_txs = {c["label"]: set() for c in compiled}
 
@@ -186,6 +186,12 @@ def count_cip20_app_txs(rows, allowlist):
                 if matched:
                     app_txs[c["label"]].add(tx_id)
 
+    return compiled, app_txs
+
+
+def count_cip20_app_txs(rows, allowlist):
+    compiled, app_txs = cip20_app_tx_sets(rows, allowlist)
+
     items = []
     for c in compiled:
         cnt = len(app_txs[c["label"]])
@@ -200,14 +206,34 @@ def count_cip20_app_txs(rows, allowlist):
     return items
 
 
-def get_cip20_app_stats(window_start, window_end):
+def cip20_items_from_sets(compiled, app_txs, script_tx_by_app):
+    items = []
+    for c in compiled:
+        merge_key = app_merge_key(c["displayName"], c["label"])
+        tx_set = app_txs.get(c["label"], set())
+        overlap = script_tx_by_app.get(merge_key)
+        if overlap:
+            tx_set = tx_set - overlap
+        cnt = len(tx_set)
+        if cnt > 0:
+            items.append(
+                {
+                    "label": c["label"],
+                    "displayName": c["displayName"],
+                    "txCount": cnt,
+                }
+            )
+    return items
+
+
+def get_cip20_app_tx_sets(window_start, window_end):
     allowlist = load_cip20_allowlist()
     if not allowlist:
-        return []
+        return [], {}
 
     patterns = build_prefilter_patterns(allowlist)
     if not patterns:
-        return []
+        return [], {}
 
     sql = load_sql("674_messages.sql")
     with psycopg.connect(**conninfo) as conn:
@@ -222,7 +248,7 @@ def get_cip20_app_stats(window_start, window_end):
             )
             rows = cur.fetchall()
 
-    return count_cip20_app_txs(rows, allowlist)
+    return cip20_app_tx_sets(rows, allowlist)
 
 
 def load_sql(filename):
@@ -434,60 +460,88 @@ def extract_eternl_registry():
         raise
 
 
-def get_registries_stats(window_start, window_end):
-    sql = load_sql("validator_tx_counts.sql")
-    registries, names = fetch_dapps_registries()
-
-    cred_to_project: dict[bytes, str] = {}
+def build_cred_app_map(registries, names):
+    cred_to_app: dict[bytes, dict] = {}
     for project_key, cred_hexes in registries.items():
+        display_name = names.get(project_key, project_key)
+        app = {
+            "merge_key": app_merge_key(display_name, project_key),
+            "label": canonical_project_name(display_name).replace(" ", "-"),
+            "displayName": display_name,
+        }
         for h in cred_hexes:
             try:
                 b = bytes.fromhex(h)
             except ValueError:
                 continue
-            cred_to_project.setdefault(b, project_key)
+            cred_to_app.setdefault(b, app)
+    return cred_to_app
 
-    all_creds = list(cred_to_project.keys())
 
-    counts_by_project = Counter()
+def get_script_hash_stats(cred_to_app, window_start, window_end):
+    if not cred_to_app:
+        return []
 
+    creds = list(cred_to_app.keys())
+    projects = [cred_to_app[c]["merge_key"] for c in creds]
+
+    sql = load_sql("validator_tx_counts.sql")
+    counts: dict[str, int] = {}
     with psycopg.connect(**conninfo) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 sql,  # type: ignore[arg-type]
                 {
-                    "payment_creds": all_creds,
+                    "payment_creds": creds,
+                    "projects": projects,
                     "window_start": window_start,
                     "window_end": window_end,
                 },
             )
+            for project, tx_count in cur.fetchall():
+                counts[project] = int(tx_count)
 
-            for payment_cred, tx_count in cur.fetchall():
-                project_key = cred_to_project.get(payment_cred)
-                if project_key:
-                    counts_by_project[project_key] += int(tx_count)
+    meta: dict[str, dict] = {}
+    for app in cred_to_app.values():
+        meta.setdefault(app["merge_key"], app)
 
-    grouped_items: dict[str, dict[str, str | int]] = {}
-    for project_key, cnt in counts_by_project.items():
+    items = []
+    for merge_key, cnt in counts.items():
         if cnt <= 0:
             continue
-
-        display_name = names.get(project_key, project_key)
-        merge_key = app_merge_key(display_name, project_key)
-
-        entry = grouped_items.get(merge_key)
-        if not entry:
-            entry = {
-                "label": canonical_project_name(display_name).replace(" ", "-"),
-                "displayName": display_name,
-                "txCount": 0,
+        app = meta[merge_key]
+        items.append(
+            {
+                "label": app["label"],
+                "displayName": app["displayName"],
+                "txCount": cnt,
             }
-            grouped_items[merge_key] = entry
+        )
+    return items
 
-        entry["txCount"] = int(entry["txCount"]) + int(cnt)
 
-    # Ranking happens in combine_app_stats after merging with cip20 stats.
-    return list(grouped_items.values())
+def get_script_tx_by_app(cred_to_app, tx_ids):
+    if not cred_to_app or not tx_ids:
+        return {}
+
+    creds = list(cred_to_app.keys())
+    projects = [cred_to_app[c]["merge_key"] for c in creds]
+
+    sql = load_sql("script_tx_overlap.sql")
+    script_tx: dict[str, set] = defaultdict(set)
+    with psycopg.connect(**conninfo) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                sql,  # type: ignore[arg-type]
+                {
+                    "payment_creds": creds,
+                    "projects": projects,
+                    "tx_ids": list(tx_ids),
+                },
+            )
+            for project, tx_id in cur.fetchall():
+                script_tx[project].add(tx_id)
+    return script_tx
 
 
 def app_merge_key(display_name, fallback):
@@ -613,15 +667,22 @@ def build_report(epoch_info):
         epoch_info["window_end"],
     )
 
-    script_hash_stats = get_registries_stats(
-        epoch_info["window_start"],
-        epoch_info["window_end"],
+    window_start = epoch_info["window_start"]
+    window_end = epoch_info["window_end"]
+
+    registries, names = fetch_dapps_registries()
+    cred_to_app = build_cred_app_map(registries, names)
+
+    script_hash_stats = get_script_hash_stats(
+        cred_to_app, window_start, window_end
     )
 
-    cip20_stats = get_cip20_app_stats(
-        epoch_info["window_start"],
-        epoch_info["window_end"],
-    )
+    compiled, app_txs = get_cip20_app_tx_sets(window_start, window_end)
+    message_tx_ids: set = set()
+    for tx_set in app_txs.values():
+        message_tx_ids |= tx_set
+    script_tx_by_app = get_script_tx_by_app(cred_to_app, message_tx_ids)
+    cip20_stats = cip20_items_from_sets(compiled, app_txs, script_tx_by_app)
 
     app_stats = combine_app_stats(script_hash_stats, cip20_stats)
 

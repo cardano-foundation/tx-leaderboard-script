@@ -4,34 +4,27 @@ WITH cred_project(payment_cred, project) AS (
 output_hits AS (
   SELECT
     o.payment_cred AS payment_cred,
-    t.id AS tx_id
+    o.tx_id AS tx_id
   FROM tx_out o
-  JOIN tx t    ON t.id = o.tx_id
-  JOIN block b ON b.id = t.block_id
   WHERE o.payment_cred = ANY(%(payment_creds)s)
-    AND b.time >= %(window_start)s
-    AND b.time <  %(window_end)s
+    AND o.tx_id = ANY(%(tx_ids)s)
 ),
 mint_hits AS (
   SELECT
     ma.policy AS payment_cred,
-    t.id AS tx_id
+    mtm.tx_id AS tx_id
   FROM ma_tx_mint mtm
   JOIN multi_asset ma ON ma.id = mtm.ident
-  JOIN tx t           ON t.id = mtm.tx_id
-  JOIN block b        ON b.id = t.block_id
   WHERE ma.policy = ANY(%(payment_creds)s)
-    AND b.time >= %(window_start)s
-    AND b.time <  %(window_end)s
+    AND mtm.tx_id = ANY(%(tx_ids)s)
 ),
 all_hits AS (
   SELECT payment_cred, tx_id FROM output_hits
   UNION ALL
   SELECT payment_cred, tx_id FROM mint_hits
 )
-SELECT
+SELECT DISTINCT
   cp.project,
-  COUNT(DISTINCT h.tx_id) AS tx_count
+  h.tx_id
 FROM all_hits h
-JOIN cred_project cp USING (payment_cred)
-GROUP BY cp.project;
+JOIN cred_project cp USING (payment_cred);
