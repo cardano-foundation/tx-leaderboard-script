@@ -9,6 +9,17 @@ output_hits AS (
   WHERE o.payment_cred = ANY(%(payment_creds)s)
     AND o.tx_id = ANY(%(tx_ids)s)
 ),
+spend_hits AS (
+  -- Mirrors validator_tx_counts.sql: transactions that spend a UTxO
+  -- locked at the credential without creating a new output there.
+  SELECT
+    o.payment_cred AS payment_cred,
+    ti.tx_in_id AS tx_id
+  FROM tx_out o
+  JOIN tx_in ti ON ti.tx_out_id = o.tx_id AND ti.tx_out_index = o.index
+  WHERE o.payment_cred = ANY(%(payment_creds)s)
+    AND ti.tx_in_id = ANY(%(tx_ids)s)
+),
 mint_hits AS (
   SELECT
     ma.policy AS payment_cred,
@@ -20,6 +31,8 @@ mint_hits AS (
 ),
 all_hits AS (
   SELECT payment_cred, tx_id FROM output_hits
+  UNION ALL
+  SELECT payment_cred, tx_id FROM spend_hits
   UNION ALL
   SELECT payment_cred, tx_id FROM mint_hits
 )
