@@ -12,6 +12,21 @@ output_hits AS (
     AND b.time >= %(window_start)s
     AND b.time <  %(window_end)s
 ),
+spend_hits AS (
+  -- Transactions that spend a UTxO previously locked at the credential
+  -- (e.g. escrow withdrawals) but that don't create a new output there,
+  -- so they aren't visible to output_hits above.
+  SELECT
+    o.payment_cred AS payment_cred,
+    ti.tx_in_id AS tx_id
+  FROM tx_out o
+  JOIN tx_in ti ON ti.tx_out_id = o.tx_id AND ti.tx_out_index = o.index
+  JOIN tx t    ON t.id = ti.tx_in_id
+  JOIN block b ON b.id = t.block_id
+  WHERE o.payment_cred = ANY(%(payment_creds)s)
+    AND b.time >= %(window_start)s
+    AND b.time <  %(window_end)s
+),
 mint_hits AS (
   SELECT
     ma.policy AS payment_cred,
@@ -26,6 +41,8 @@ mint_hits AS (
 ),
 all_hits AS (
   SELECT payment_cred, tx_id FROM output_hits
+  UNION ALL
+  SELECT payment_cred, tx_id FROM spend_hits
   UNION ALL
   SELECT payment_cred, tx_id FROM mint_hits
 )
