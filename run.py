@@ -64,6 +64,7 @@ conninfo = {
     "port": int(os.environ["DB_PORT"]),
     "dbname": os.environ["DB_NAME"],
     "user": os.environ["DB_USER"],
+    "options": "-c max_parallel_workers_per_gather=0",
 }
 
 if "DB_PASSWORD" in os.environ:
