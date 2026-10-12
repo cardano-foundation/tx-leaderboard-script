@@ -55,7 +55,12 @@ ETERNL_PROJECTS_REGISTRY_URL = (
     "registry/projects?ref=main"
 )
 
-ALIASES = {"jpgstore": "jpg.store"}
+ALIASES = {
+    "jpgstore": "jpg.store",
+    # Strica lists these projects under a longer name than CRFA and Eternl.
+    "splash protocol": "splash",
+    "intersect budget contracts": "intersect",
+}
 MIN_TX_THRESHOLD = 100
 MAX_GROUPS = 200
 
@@ -463,6 +468,7 @@ def extract_eternl_registry():
 
 def build_cred_app_map(registries, names):
     cred_to_app: dict[bytes, dict] = {}
+    conflicts: dict[tuple, set] = defaultdict(set)
     for project_key, cred_hexes in registries.items():
         display_name = names.get(project_key, project_key)
         app = {
@@ -475,7 +481,16 @@ def build_cred_app_map(registries, names):
                 b = bytes.fromhex(h)
             except ValueError:
                 continue
-            cred_to_app.setdefault(b, app)
+            owner = cred_to_app.setdefault(b, app)
+            if owner["merge_key"] != app["merge_key"]:
+                conflicts[(owner["displayName"], display_name)].add(b)
+    # A hash listed under several projects counts for the first one only.
+    # Surface it so the registries or ALIASES can be fixed.
+    for (kept, other), creds in sorted(conflicts.items()):
+        print(
+            f"[warn] {len(creds)} script hashes listed for both {kept} and {other}, "
+            f"counted for {kept} only"
+        )
     return cred_to_app
 
 

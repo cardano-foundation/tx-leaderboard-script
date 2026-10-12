@@ -10,5 +10,5 @@ JOIN tx t    ON t.id = tm.tx_id
 JOIN block b ON b.id = t.block_id
 WHERE tm.key = 674
   AND b.time >= %(start_time)s
-  AND b.time <  %(end_time)s
+  AND b.time <= %(end_time)s
   AND tm.json::text ILIKE ANY(%(patterns)s);

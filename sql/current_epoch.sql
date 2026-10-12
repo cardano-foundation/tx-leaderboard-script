@@ -1,3 +1,5 @@
+-- window_start and window_end are the times of the first and the last block in
+-- the window, so queries filter with >= window_start AND <= window_end.
 WITH cur AS (
   SELECT max(no) AS cur_epoch
   FROM epoch

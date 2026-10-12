@@ -10,7 +10,7 @@ output_hits AS (
   JOIN block b ON b.id = t.block_id
   WHERE o.payment_cred = ANY(%(payment_creds)s)
     AND b.time >= %(window_start)s
-    AND b.time <  %(window_end)s
+    AND b.time <= %(window_end)s
 ),
 spend_hits AS (
   -- Transactions that spend a UTxO previously locked at the credential
@@ -25,7 +25,7 @@ spend_hits AS (
   JOIN block b ON b.id = t.block_id
   WHERE o.payment_cred = ANY(%(payment_creds)s)
     AND b.time >= %(window_start)s
-    AND b.time <  %(window_end)s
+    AND b.time <= %(window_end)s
 ),
 mint_hits AS (
   SELECT
@@ -37,7 +37,7 @@ mint_hits AS (
   JOIN block b        ON b.id = t.block_id
   WHERE ma.policy = ANY(%(payment_creds)s)
     AND b.time >= %(window_start)s
-    AND b.time <  %(window_end)s
+    AND b.time <= %(window_end)s
 ),
 all_hits AS (
   SELECT payment_cred, tx_id FROM output_hits
