@@ -31,6 +31,7 @@ BASE_DIR = Path(__file__).parent
 SQL_DIR = BASE_DIR / "sql"
 CACHE_DIR = BASE_DIR / "data"
 CIP20_APPS_FILE = CACHE_DIR / "cip20_apps.json"
+ADDRESS_APPS_FILE = CACHE_DIR / "address_apps.json"
 
 LAST_EPOCH_FILE = BASE_DIR / "data" / "last_pr_epoch.txt"
 
@@ -119,6 +120,104 @@ def load_cip20_allowlist(path=CIP20_APPS_FILE):
     if not isinstance(data, list):
         return []
     return data
+
+
+BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+BECH32_GENERATOR = (0x3B6A57B2, 0x26508E6D, 0x1EA119FA, 0x3D4233DD, 0x2A1462B3)
+
+
+def bech32_decode(text):
+    # Minimal BIP-173 decoder. Cardano addresses are longer than the
+    # 90 character limit of the spec, so no length check is applied.
+    text = text.strip()
+    if text.lower() != text and text.upper() != text:
+        raise ValueError("mixed case")
+    text = text.lower()
+    hrp, sep, data = text.rpartition("1")
+    if not sep or not hrp or len(data) < 6:
+        raise ValueError("missing separator or data")
+    values = [BECH32_CHARSET.index(c) for c in data if c in BECH32_CHARSET]
+    if len(values) != len(data):
+        raise ValueError("invalid character")
+
+    chk = 1
+    for v in [ord(c) >> 5 for c in hrp] + [0] + [ord(c) & 31 for c in hrp] + values:
+        top = chk >> 25
+        chk = (chk & 0x1FFFFFF) << 5 ^ v
+        for i, gen in enumerate(BECH32_GENERATOR):
+            if (top >> i) & 1:
+                chk ^= gen
+    if chk != 1:
+        raise ValueError("bad checksum")
+
+    # Regroup the 5 bit values (without the 6 checksum values) into bytes.
+    acc, bits, out = 0, 0, bytearray()
+    for v in values[:-6]:
+        acc = (acc << 5) | v
+        bits += 5
+        if bits >= 8:
+            bits -= 8
+            out.append((acc >> bits) & 0xFF)
+    if bits >= 5 or acc & ((1 << bits) - 1):
+        raise ValueError("invalid padding")
+    return hrp, bytes(out)
+
+
+def address_payment_cred(address):
+    # Returns the 28 byte payment credential of a mainnet Shelley address,
+    # the value db-sync stores in tx_out.payment_cred.
+    hrp, payload = bech32_decode(address)
+    header = payload[0] if payload else 0xFF
+    addr_type = header >> 4
+    # Only base addresses (types 0 to 3, payment plus stake credential) and
+    # enterprise addresses (types 6 and 7, payment credential only) are
+    # accepted. Pointer and reward addresses are not.
+    if addr_type <= 3:
+        valid_length = len(payload) == 57
+    elif addr_type in (6, 7):
+        valid_length = len(payload) == 29
+    else:
+        valid_length = False
+    if hrp != "addr" or header & 0x0F != 1 or not valid_length:
+        raise ValueError(f"not a mainnet payment address: {address}")
+    return payload[1:29]
+
+
+def load_address_allowlist(path=ADDRESS_APPS_FILE):
+    if not path.exists():
+        return []
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, list):
+        raise ValueError(f"{path.name} must contain a list")
+    return data
+
+
+def address_cred_map(allowlist):
+    # Same shape as build_cred_app_map, so allowlisted addresses are counted
+    # by the same queries as registered script hashes. Errors are raised
+    # instead of skipped because the allowlist is curated via pull requests.
+    cred_to_app: dict[bytes, dict] = {}
+    labels = set()
+    for app in allowlist:
+        label = app["label"]
+        if label in labels:
+            raise ValueError(f"duplicate label in address allowlist: {label}")
+        labels.add(label)
+        display_name = app.get("displayName", label)
+        entry = {
+            "merge_key": app_merge_key(display_name, label),
+            "label": label,
+            "displayName": display_name,
+        }
+        addresses = app.get("addresses")
+        if not isinstance(addresses, list) or not addresses:
+            raise ValueError(f"no addresses listed for {label}")
+        for address in addresses:
+            cred = address_payment_cred(str(address))
+            if cred in cred_to_app:
+                raise ValueError(f"duplicate payment credential: {address}")
+            cred_to_app[cred] = entry
+    return cred_to_app
 
 
 def build_prefilter_patterns(allowlist):
@@ -673,6 +772,9 @@ def build_report(epoch_info):
 
     registries, names = fetch_dapps_registries()
     cred_to_app = build_cred_app_map(registries, names)
+    # A credential that is also a registered script keeps its registry project.
+    for cred, app in address_cred_map(load_address_allowlist()).items():
+        cred_to_app.setdefault(cred, app)
 
     script_hash_stats = get_script_hash_stats(
         cred_to_app, window_start, window_end

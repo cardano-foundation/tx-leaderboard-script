@@ -4,4 +4,5 @@ __pycache__/
 *.pyc
 data/*
 !data/cip20_apps.json
+!data/address_apps.json
 .DS_Store
