@@ -46,6 +46,27 @@ a generic word like `cardano` or `swap`; it would falsely match unrelated transa
 and your PR will be rejected. Before submitting, confirm your transactions actually carry
 the tag and that it does not collide with another listed app.
 
+## Registering an address
+
+Projects whose activity runs through a plain address, without a registered script and
+without a distinctive CIP-20 message, can be attributed by adding themselves to
+`data/address_apps.json` via a pull request.
+
+```json
+{ "label": "example-app", "displayName": "Example App", "addresses": ["addr1..."] }
+```
+
+- `label` and `displayName` work as in the CIP-20 allowlist.
+- `addresses`: one or more mainnet base or enterprise addresses (`addr1...`). Matching
+  uses the address's payment credential, so every address that shares it counts,
+  whatever its stake part.
+- An allowlisted address is counted exactly like a registered script hash: every
+  transaction that creates an output at it or spends an output from it. If the
+  credential is already in a script registry, the registry project keeps it.
+- Only list addresses the project controls and uses exclusively. Exchange, custodial or
+  otherwise shared addresses will be rejected. Maintainers may ask for proof of control,
+  for example a message signed with the address key.
+
 ## Configuration
 
 Set the database credentials via environment variables or a `.env` file (loaded automatically):
@@ -103,14 +124,15 @@ Each run emits two reports with the same structure but different reporting windo
 }
 ```
 
-The `appStats` section ranks projects by transaction volume from two attribution
+The `appStats` section ranks projects by transaction volume from three attribution
 sources: registered validator scripts (CRFA/Strica/Eternl script hashes and mint
-policies) and the CIP-20 app allowlist (`data/cip20_apps.json`). A project's `txCount`
-is the **distinct union** of both sources, deduplicated per project: a transaction that
-touches several of a project's own scripts, or that both hits a script and carries a
-matching message, is counted once for that project. A transaction touching two
-*different* projects still counts once for each. `metadataLabelStats` highlights the
-most-used metadata labels and whether they appear in CIP-0010.
+policies), the address allowlist (`data/address_apps.json`) and the CIP-20 app
+allowlist (`data/cip20_apps.json`). A project's `txCount` is the **distinct union** of
+all sources, deduplicated per project: a transaction that touches several of a
+project's own scripts, or that both hits a script and carries a matching message, is
+counted once for that project. A transaction touching two *different* projects still
+counts once for each. `metadataLabelStats` highlights the most-used metadata labels and
+whether they appear in CIP-0010.
 
 ## SQL reference
 
